@@ -5,65 +5,55 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * 弱引用缓存
- * 
+ * 弱引用缓存类，
+ * 当某种数据需要被重复使用，此数据加载需要一定时间，但全部加载到内存中又太占资源时，可以考虑用此工具类。
+ * 此类缓存了数据键值对在内存中，当缓存中没有对应的key、或key对应的值为null时，通过loadByKey从外部加载数据；
+ * 缓存在GC时由JDK自行判断是否回收，也可调用clear方法手动清理
  * @author liuyu
- *
+ * @date 2016年7月27日
+ * @param <K>
+ * @param <V>
  */
-public class WeakCache<K, V> {
-
-	private ReadWriteLock rwLock = new ReentrantReadWriteLock();
-
+public abstract class WeakCache<K,V> {
+	
+	private final WeakHashMap<K,V> cacheMap;
+	
+	private final ReadWriteLock lock = new ReentrantReadWriteLock();
+	
+	public WeakCache(){
+		cacheMap = new WeakHashMap<>();
+	}
+	
+	public WeakCache(int initCacheMapSize){
+		cacheMap = new WeakHashMap<>(initCacheMapSize);
+	}
+	
 	/**
-	 * 弱引用key,供WeakHashMap使用
-	 * 
-	 * @author liuyu
-	 *
-	 * @param <K>
+	 * 当cache中没有key对应的值时，通过此方法从外部加载
+	 * @param key
+	 * @return
 	 */
-	@SuppressWarnings("hiding")
-	private class WeakKey<K> {
-		WeakKey(K k) {
-			this.k = k;
-		}
+	protected abstract V loadByKey(K key);
+	
+	public V get(K key){
+		lock.readLock().lock();
+		V res = cacheMap.get(key);
+		lock.readLock().unlock();
+		if(null==res){
+			res = loadByKey(key);
+			final V v = res;
+			lock.writeLock().lock();
+			cacheMap.put(key, v);
+			lock.writeLock().unlock();
 
-		K k;
-
-		@Override
-		public boolean equals(Object obj) {
-			@SuppressWarnings("unchecked")
-			WeakKey<K> other = (WeakKey<K>) obj;
-			return k.equals(other.k);
 		}
-
-		@Override
-		public int hashCode() {
-			return k.hashCode();
-		}
+		return res;
 	}
-
-	private WeakHashMap<WeakKey<K>, V> cache = new WeakHashMap<WeakKey<K>, V>();
-
-	public void put(K k, V v) {
-		rwLock.writeLock().lock();
-		try {
-			WeakKey<K> wk = new WeakKey<K>(k);
-			cache.put(wk, v);
-		} finally {
-			rwLock.writeLock().unlock();
-		}
-
+	
+	public void clear(){
+		lock.writeLock().lock();
+		cacheMap.clear();
+		lock.writeLock().unlock();
 	}
-
-	public V get(K k) {
-		rwLock.readLock().lock();
-		try {
-			WeakKey<K> wk = new WeakKey<K>(k);
-			wk.k = k;
-			return cache.get(wk);
-		} finally {
-			rwLock.readLock().unlock();
-		}
-
-	}
+	
 }
